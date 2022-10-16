@@ -186,3 +186,6 @@ user_data_fields = [
 override_doctype_class = {
     "Payroll Entry": "ifix.whitelisted.IPayrollEntry",
 }
+doctype_js = {
+	"Salary Slip" : "public/js/salary_slip.js"
+	}
