@@ -179,3 +179,10 @@ user_data_fields = [
 #	"ifix.auth.validate"
 # ]
 
+# override_whitelisted_methods = {
+#     "erpnext.payroll.doctype.payroll_entry.payroll_entry.make_payment_entry": "ifix.whitelisted.payroll_entry_make_payment_entry"
+# }
+
+override_doctype_class = {
+    "Payroll Entry": "ifix.whitelisted.IPayrollEntry",
+}
