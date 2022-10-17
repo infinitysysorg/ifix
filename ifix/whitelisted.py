@@ -3,6 +3,53 @@ import frappe
 
 class IPayrollEntry(PayrollEntry):
     @frappe.whitelist()
+    def fill_employee_details(self):
+        self.set("employees", [])
+        employees = self.get_emp_list()
+        if not employees:
+            error_msg = _(
+                "No employees found for the mentioned criteria:<br>Company: {0}<br> Currency: {1}<br>Payroll Payable Account: {2}"
+            ).format(
+                frappe.bold(self.company),
+                frappe.bold(self.currency),
+                frappe.bold(self.payroll_payable_account),
+            )
+            if self.branch:
+                error_msg += "<br>" + _("Branch: {0}").format(frappe.bold(self.branch))
+            if self.department:
+                error_msg += "<br>" + _("Department: {0}").format(frappe.bold(self.department))
+            if self.designation:
+                error_msg += "<br>" + _("Designation: {0}").format(frappe.bold(self.designation))
+            if self.start_date:
+                error_msg += "<br>" + _("Start date: {0}").format(frappe.bold(self.start_date))
+            if self.end_date:
+                error_msg += "<br>" + _("End date: {0}").format(frappe.bold(self.end_date))
+            frappe.throw(error_msg, title=_("No employees found"))
+
+        for d in employees:
+            self.append("employees", d)
+
+        self.number_of_employees = len(self.employees)
+        """
+            Inserted by Infinity Systems To Fetch Payment Account From Slalary Structures
+        """
+        
+        condition = ""
+        if self.payroll_frequency:
+            condition = """and payroll_frequency = '%(payroll_frequency)s'""" % {
+                "payroll_frequency": self.payroll_frequency
+            }
+
+        sal_struct = get_sal_struct_payment_account(
+            self.company, self.currency, self.salary_slip_based_on_timesheet, condition
+        )
+        if sal_struct:
+            self.payment_account = sal_struct[0] 
+        
+        if self.validate_attendance:
+            return self.validate_employee_attendance()
+
+    @frappe.whitelist()
     def make_payment_entry(self):
         self.check_permission("write")
 
@@ -50,3 +97,24 @@ class IPayrollEntry(PayrollEntry):
             if salary_slip_total > 0:
                 self.create_journal_entry(salary_slip_total, "salary")
 
+
+def get_sal_struct_payment_account(company, currency, salary_slip_based_on_timesheet, condition):
+	return frappe.db.sql_list(
+		"""
+		select
+			distinct payment_account from `tabSalary Structure`
+		where
+			docstatus = 1 and
+			is_active = 'Yes'
+			and company = %(company)s
+			and currency = %(currency)s and
+			ifnull(salary_slip_based_on_timesheet,0) = %(salary_slip_based_on_timesheet)s
+			{condition}""".format(
+			condition=condition
+		),
+		{
+			"company": company,
+			"currency": currency,
+			"salary_slip_based_on_timesheet": salary_slip_based_on_timesheet,
+		},
+	)
