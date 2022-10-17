@@ -182,9 +182,9 @@ user_data_fields = [
 # override_whitelisted_methods = {
 #     "erpnext.payroll.doctype.payroll_entry.payroll_entry.make_payment_entry": "ifix.whitelisted.payroll_entry_make_payment_entry"
 # }
-
+fixtures = [{"dt": "Custom Field", "filters": [["fieldname", "like", "reference_%"]]}]
 override_doctype_class = {
-    "Payroll Entry": "ifix.whitelisted.IPayrollEntry",
+    "Payroll Entry": "ifix.IPayrollEntry.IPayrollEntry",
 }
 doctype_js = {
 	"Salary Slip" : "public/js/salary_slip.js"

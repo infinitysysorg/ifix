@@ -1,5 +1,22 @@
 from erpnext.payroll.doctype.payroll_entry.payroll_entry import PayrollEntry
 import frappe
+from frappe import _
+import erpnext
+from erpnext.accounts.doctype.accounting_dimension.accounting_dimension import (
+	get_accounting_dimensions,
+)
+
+from frappe.utils import (
+	DATE_FORMAT,
+	add_days,
+	add_to_date,
+	cint,
+	comma_and,
+	date_diff,
+	flt,
+	get_link_to_form,
+	getdate,
+)
 
 class IPayrollEntry(PayrollEntry):
     @frappe.whitelist()
@@ -33,7 +50,9 @@ class IPayrollEntry(PayrollEntry):
         """
             Inserted by Infinity Systems To Fetch Payment Account From Slalary Structures
         """
-        
+        """
+        BEGIN
+        """
         condition = ""
         if self.payroll_frequency:
             condition = """and payroll_frequency = '%(payroll_frequency)s'""" % {
@@ -45,7 +64,9 @@ class IPayrollEntry(PayrollEntry):
         )
         if sal_struct:
             self.payment_account = sal_struct[0] 
-        
+        """
+        END
+        """
         if self.validate_attendance:
             return self.validate_employee_attendance()
 
@@ -92,14 +113,90 @@ class IPayrollEntry(PayrollEntry):
                     )
                     if statistical_component != 1:
                         salary_slip_total -= sal_detail.amount
+                """
+                Inserted by Infinity Systems To Deduct Loan Installment From Salary Voucher
+                """
+                """
+                BEGIN
+                """
                 for sal_loan in salary_slip.loans:
                     salary_slip_total = salary_slip_total - sal_loan.total_payment
+                """
+                END
+                """
             if salary_slip_total > 0:
                 self.create_journal_entry(salary_slip_total, "salary")
 
+    def create_journal_entry(self, je_payment_amount, user_remark):
+        payroll_payable_account = self.payroll_payable_account
+        precision = frappe.get_precision("Journal Entry Account", "debit_in_account_currency")
+
+        accounts = []
+        currencies = []
+        multi_currency = 0
+        company_currency = erpnext.get_company_currency(self.company)
+        accounting_dimensions = get_accounting_dimensions() or []
+
+        exchange_rate, amount = self.get_amount_and_exchange_rate_for_journal_entry(
+            self.payment_account, je_payment_amount, company_currency, currencies
+        )
+        accounts.append(
+            self.update_accounting_dimensions(
+                {
+                    "account": self.payment_account,
+                    "bank_account": self.bank_account,
+                    "credit_in_account_currency": flt(amount, precision),
+                    "exchange_rate": flt(exchange_rate),
+                },
+                accounting_dimensions,
+            )
+        )
+
+        exchange_rate, amount = self.get_amount_and_exchange_rate_for_journal_entry(
+            payroll_payable_account, je_payment_amount, company_currency, currencies
+        )
+        accounts.append(
+            self.update_accounting_dimensions(
+                {
+                    "account": payroll_payable_account,
+                    "debit_in_account_currency": flt(amount, precision),
+                    "exchange_rate": flt(exchange_rate),
+                    "reference_type": self.doctype,
+                    "reference_name": self.name,
+                },
+                accounting_dimensions,
+            )
+        )
+
+        if len(currencies) > 1:
+            multi_currency = 1
+
+        journal_entry = frappe.new_doc("Journal Entry")
+        journal_entry.voucher_type = "Bank Entry"
+        journal_entry.user_remark = _("Payment of {0} from {1} to {2}").format(
+            user_remark, self.start_date, self.end_date
+        )
+        journal_entry.company = self.company
+        journal_entry.posting_date = self.posting_date
+        journal_entry.multi_currency = multi_currency
+
+        journal_entry.set("accounts", accounts)
+        """
+        BEGIN
+        """
+        journal_entry.reference_doctype = self.doctype
+        journal_entry.reference_document = self.name
+        """
+        END
+        """
+        
+        journal_entry.save(ignore_permissions=True)
 
 def get_sal_struct_payment_account(company, currency, salary_slip_based_on_timesheet, condition):
-	return frappe.db.sql_list(
+    """
+        Method to collect all payment_account values in the Salary Structures
+    """
+    return frappe.db.sql_list(
 		"""
 		select
 			distinct payment_account from `tabSalary Structure`
