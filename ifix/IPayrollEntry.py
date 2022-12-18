@@ -193,6 +193,7 @@ class IPayrollEntry(PayrollEntry):
         """
         
         journal_entry.save(ignore_permissions=True)
+        frappe.msgprint('Journal Entry Created With Reference Name {0}'.format(self.name), alert = 1)
 
 def get_sal_struct_payment_account(company, currency, salary_slip_based_on_timesheet, condition):
     """
