@@ -147,6 +147,8 @@ class IPayrollEntry(PayrollEntry):
                     "bank_account": self.bank_account,
                     "credit_in_account_currency": flt(amount, precision),
                     "exchange_rate": flt(exchange_rate),
+                    "reference_type": self.doctype,
+                    "reference_name": self.name,
                 },
                 accounting_dimensions,
             )
