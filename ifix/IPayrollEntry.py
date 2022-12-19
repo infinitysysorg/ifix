@@ -127,73 +127,173 @@ class IPayrollEntry(PayrollEntry):
             if salary_slip_total > 0:
                 self.create_journal_entry(salary_slip_total, "salary")
 
-    def create_journal_entry(self, je_payment_amount, user_remark):
+    def make_accrual_jv_entry(self):
+        self.check_permission("write")
+        earnings = self.get_salary_component_total(component_type="earnings") or {}
+        deductions = self.get_salary_component_total(component_type="deductions") or {}
         payroll_payable_account = self.payroll_payable_account
+        jv_name = ""
         precision = frappe.get_precision("Journal Entry Account", "debit_in_account_currency")
 
-        accounts = []
-        currencies = []
-        multi_currency = 0
-        company_currency = erpnext.get_company_currency(self.company)
-        accounting_dimensions = get_accounting_dimensions() or []
-
-        exchange_rate, amount = self.get_amount_and_exchange_rate_for_journal_entry(
-            self.payment_account, je_payment_amount, company_currency, currencies
-        )
-        accounts.append(
-            self.update_accounting_dimensions(
-                {
-                    "account": self.payment_account,
-                    "bank_account": self.bank_account,
-                    "credit_in_account_currency": flt(amount, precision),
-                    "exchange_rate": flt(exchange_rate),
-                    "reference_type": self.doctype,
-                    "reference_name": self.name,
-                },
-                accounting_dimensions,
+        if earnings or deductions:
+            journal_entry = frappe.new_doc("Journal Entry")
+            journal_entry.voucher_type = "Journal Entry"
+            journal_entry.user_remark = _("Accrual Journal Entry for salaries from {0} to {1}").format(
+                self.start_date, self.end_date
             )
-        )
+            journal_entry.company = self.company
+            journal_entry.posting_date = self.posting_date
+            accounting_dimensions = get_accounting_dimensions() or []
 
-        exchange_rate, amount = self.get_amount_and_exchange_rate_for_journal_entry(
-            payroll_payable_account, je_payment_amount, company_currency, currencies
-        )
-        accounts.append(
-            self.update_accounting_dimensions(
-                {
-                    "account": payroll_payable_account,
-                    "debit_in_account_currency": flt(amount, precision),
-                    "exchange_rate": flt(exchange_rate),
-                    "reference_type": self.doctype,
-                    "reference_name": self.name,
-                },
-                accounting_dimensions,
+            accounts = []
+            currencies = []
+            payable_amount = 0
+            multi_currency = 0
+            company_currency = erpnext.get_company_currency(self.company)
+
+            # Earnings
+            for acc_cc, amount in earnings.items():
+                exchange_rate, amt = self.get_amount_and_exchange_rate_for_journal_entry(
+                    acc_cc[0], amount, company_currency, currencies
+                )
+                payable_amount += flt(amount, precision)
+                accounts.append(
+                    self.update_accounting_dimensions(
+                        {
+                            "account": acc_cc[0],
+                            "debit_in_account_currency": flt(amt, precision),
+                            "exchange_rate": flt(exchange_rate),
+                            "cost_center": acc_cc[1] or self.cost_center,
+                            "project": self.project,
+                        },
+                        accounting_dimensions,
+                    )
+                )
+
+            # Deductions
+            for acc_cc, amount in deductions.items():
+                exchange_rate, amt = self.get_amount_and_exchange_rate_for_journal_entry(
+                    acc_cc[0], amount, company_currency, currencies
+                )
+                payable_amount -= flt(amount, precision)
+                accounts.append(
+                    self.update_accounting_dimensions(
+                        {
+                            "account": acc_cc[0],
+                            "credit_in_account_currency": flt(amt, precision),
+                            "exchange_rate": flt(exchange_rate),
+                            "cost_center": acc_cc[1] or self.cost_center,
+                            "project": self.project,
+                            "reference_type": self.doctype,
+                            "reference_name": self.name,
+                        },
+                        accounting_dimensions,
+                    )
+                )
+
+            # Payable amount
+            exchange_rate, payable_amt = self.get_amount_and_exchange_rate_for_journal_entry(
+                payroll_payable_account, payable_amount, company_currency, currencies
             )
-        )
+            accounts.append(
+                self.update_accounting_dimensions(
+                    {
+                        "account": payroll_payable_account,
+                        "credit_in_account_currency": flt(payable_amt, precision),
+                        "exchange_rate": flt(exchange_rate),
+                        "cost_center": self.cost_center,
+                        "reference_type": self.doctype,
+                        "reference_name": self.name,
+                    },
+                    accounting_dimensions,
+                )
+            )
 
-        if len(currencies) > 1:
-            multi_currency = 1
+            journal_entry.set("accounts", accounts)
+            if len(currencies) > 1:
+                multi_currency = 1
+            journal_entry.multi_currency = multi_currency
+            journal_entry.title = payroll_payable_account
+            journal_entry.save()
 
-        journal_entry = frappe.new_doc("Journal Entry")
-        journal_entry.voucher_type = "Bank Entry"
-        journal_entry.user_remark = _("Payment of {0} from {1} to {2}").format(
-            user_remark, self.start_date, self.end_date
-        )
-        journal_entry.company = self.company
-        journal_entry.posting_date = self.posting_date
-        journal_entry.multi_currency = multi_currency
+            try:
+                journal_entry.submit()
+                jv_name = journal_entry.name
+                self.update_salary_slip_status(jv_name=jv_name)
+            except Exception as e:
+                if type(e) in (str, list, tuple):
+                    frappe.msgprint(e)
+                raise
+        frappe.msgprint('Journal voucher created successfully.', alert =1)
+        return jv_name
 
-        journal_entry.set("accounts", accounts)
-        """
-        BEGIN
-        """
-        journal_entry.reference_doctype = self.doctype
-        journal_entry.reference_document = self.name
-        """
-        END
-        """
+    # def create_journal_entry(self, je_payment_amount, user_remark):
+    #     payroll_payable_account = self.payroll_payable_account
+    #     precision = frappe.get_precision("Journal Entry Account", "debit_in_account_currency")
+
+    #     accounts = []
+    #     currencies = []
+    #     multi_currency = 0
+    #     company_currency = erpnext.get_company_currency(self.company)
+    #     accounting_dimensions = get_accounting_dimensions() or []
+
+    #     exchange_rate, amount = self.get_amount_and_exchange_rate_for_journal_entry(
+    #         self.payment_account, je_payment_amount, company_currency, currencies
+    #     )
+    #     accounts.append(
+    #         self.update_accounting_dimensions(
+    #             {
+    #                 "account": self.payment_account,
+    #                 "bank_account": self.bank_account,
+    #                 "credit_in_account_currency": flt(amount, precision),
+    #                 "exchange_rate": flt(exchange_rate),
+    #                 "reference_type": self.doctype,
+    #                 "reference_name": self.name,
+    #             },
+    #             accounting_dimensions,
+    #         )
+    #     )
+
+    #     exchange_rate, amount = self.get_amount_and_exchange_rate_for_journal_entry(
+    #         payroll_payable_account, je_payment_amount, company_currency, currencies
+    #     )
+    #     accounts.append(
+    #         self.update_accounting_dimensions(
+    #             {
+    #                 "account": payroll_payable_account,
+    #                 "debit_in_account_currency": flt(amount, precision),
+    #                 "exchange_rate": flt(exchange_rate),
+    #                 "reference_type": self.doctype,
+    #                 "reference_name": self.name,
+    #             },
+    #             accounting_dimensions,
+    #         )
+    #     )
+
+    #     if len(currencies) > 1:
+    #         multi_currency = 1
+
+    #     journal_entry = frappe.new_doc("Journal Entry")
+    #     journal_entry.voucher_type = "Bank Entry"
+    #     journal_entry.user_remark = _("Payment of {0} from {1} to {2}").format(
+    #         user_remark, self.start_date, self.end_date
+    #     )
+    #     journal_entry.company = self.company
+    #     journal_entry.posting_date = self.posting_date
+    #     journal_entry.multi_currency = multi_currency
+
+    #     journal_entry.set("accounts", accounts)
+    #     """
+    #     BEGIN
+    #     """
+    #     journal_entry.reference_doctype = self.doctype
+    #     journal_entry.reference_document = self.name
+    #     """
+    #     END
+    #     """
         
-        journal_entry.save(ignore_permissions=True)
-        frappe.msgprint('Journal Entry Created With Reference Name {0}'.format(self.name), alert = 1)
+    #     journal_entry.save(ignore_permissions=True)
+    #     frappe.msgprint('Journal Entry Created With Reference Name {0}'.format(self.name), alert = 1)
 
 def get_sal_struct_payment_account(company, currency, salary_slip_based_on_timesheet, condition):
     """
