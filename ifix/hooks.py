@@ -187,5 +187,6 @@ override_doctype_class = {
     "Payroll Entry": "ifix.IPayrollEntry.IPayrollEntry",
 }
 doctype_js = {
-	"Salary Slip" : "public/js/salary_slip.js"
+	"Salary Slip" : "public/js/salary_slip.js",
+	"Payroll Entry": "public/js/payroll_entry.js"
 	}
